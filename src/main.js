@@ -1,75 +1,27 @@
 require("dotenv").config();
 
-const colors = require("colors/safe");
+const { pascalCase } = require("change-case");
 
 const { Bot } = require("./Bot/Bot.js");
 
 const { SelfDetector } = require("./SelfDetector/SelfDetector.js");
 
 const { WEBSOCKET_URL } = process.env;
-const SPAMBOT_MESSAGES = process.env.SPAMBOT_MESSAGES.split(";;;");
 
 const stdin = process.openStdin();
 
-const log = (id, message) => {
-  const colorDispatcher = id % 2 === 0 ? colors.green : colors.yellow;
-
-  console.log(
-    colorDispatcher(`[${id}] [${new Date().toISOString()}] ${message}`)
-  );
-};
-
-const isSpambotMessage = (json) => {
-  return SPAMBOT_MESSAGES.some((message) => {
-    const that = json.message.toLowerCase();
-    const another = message.toLowerCase();
-
-    return that.includes(another);
-  });
-};
+const PYTHON_REGEXP = /([a-z])_(a-z])/g;
 
 const subscribeToBots = async ([bot1, bot2]) => {
   bot1.on("message", async (data) => {
-    const json = JSON.parse(data);
-    const { event } = json;
+    const { event } = JSON.parse(data);
 
-    let shouldGetPartner = true;
+    const className = `${pascalCase(event, {
+      splitRegexp: PYTHON_REGEXP,
+    })}Response`;
 
-    try {
-      if (event === "start_typing") {
-        bot2.startTyping();
-      } else if (event === "stop_typing") {
-        bot2.stopTyping();
-      } else if (event === "message" && !json.mine) {
-        if (isSpambotMessage(json)) {
-          log(
-            bot1.id,
-            `spambot message (${json.message}), terminate conversation`
-          );
-          bot1.terminateConversation();
-          shouldGetPartner = false;
-          await new Promise((r) =>
-            setTimeout(() => {
-              r((shouldGetPartner = true));
-            }, 1000)
-          );
-          bot1.banrequest();
-        } else {
-          bot2.sendMessage(json.message);
-          bot2.stopTyping();
-        }
-        log(bot1.id, json.message);
-      } else if (event === "terminate_conversation") {
-        log(bot1.id, `terminate conversation`);
-        if (shouldGetPartner) {
-          await bot1.getPartner();
-        }
-      } else if (event === "joined_to_conversation") {
-        log(bot1.id, `joined to conversation`);
-      } else if (event === "user_registered") {
-        log(bot1.id, `user registered`);
-      }
-    } catch {}
+    eval(`import("./Responses/${className}.js")
+    .then(({${className}}) => new ${className}().react(${data}, bot1, bot2)).catch(() => {});`);
   });
 };
 
